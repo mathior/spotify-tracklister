@@ -124,6 +124,6 @@ if __name__ == '__main__':
     
     printtable(e)
     
-    save(e, 'spotify-tracks_{}_extracted.json'.format(ts))
+    save(e, 'spotify-tracks_{}.json'.format(ts))
 
     
