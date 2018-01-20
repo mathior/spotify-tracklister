@@ -13,6 +13,11 @@ This tool reads a list of song links or track URI's from an input file and
 prints a title/album/artist table.
 
 
+## Requirements
+- Python 2.7
+- cURL
+
+
 ## Howto
 - add song links or track URI's to a text file (e.g. "tracks.txt"), one per line
 - add an auth token into a file named auth.token (see below how to get a token)
