@@ -21,8 +21,8 @@ prints a title/album/artist table.
 $ python stl.py tracks.txt
 
 - this will print a table with title/album/artist information to stdout and also
-write two json files named "spotify-tracks\_<datetime>.json" and 
-"spotify-tracks\_2018-01-17T02:48:15CET\_raw.json"
+write two json files named "spotify-tracks\_\<datetime\>.json" and 
+"spotify-tracks\_\<datetime\>\_raw.json"
 
 
 ## Howto receive OAuth token
