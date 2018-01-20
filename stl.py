@@ -3,7 +3,8 @@
 import sys
 import json
 import time
-from subprocess import check_output, CalledProcessError
+import requests
+import re
 
 """Extracts some information from the JSON result of an Spotify API tracks
 request.
@@ -70,33 +71,36 @@ def printtable(data):
 def loadtracksdata(trackidlist, token):
     ids = ','.join(trackidlist)
     url = 'https://api.spotify.com/v1/tracks?ids={}'.format(ids)
-    authheader = 'Authorization: Bearer {}'.format(token)
-    try:
-        output = check_output(['curl', '-X', 'GET', url, '-H', 'Accept: application/json', '-H', authheader])
-    except CalledProcessError as e:
-        print(e)
-        sys.exit(1)
-    response = json.loads(output)
-    if 'error' in response:
-        print(output)
-        sys.exit(1)
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer {}'.format(token)}
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        return res.json()
     else:
-        return(response)
+        print('Error while loading tracks: {} {}'.format(res.status_code, res.reason))
+        print(res.text)
 
 
 def loadtrackids(filename):
     with open(filename) as f:
         lines = [l.strip() for l in f.readlines() if l.strip()]
     trackids = []
+    ifpat = re.compile('<iframe src="https://open.spotify.com/embed/track/(.*?)".*</iframe>')
     for l in lines:
         if l.startswith('spotify:track:'):
             tid = l.replace('spotify:track:', '')
-            trackids.append(tid)
         elif l.startswith('https://open.spotify.com/track/'):
             tid = l.replace('https://open.spotify.com/track/', '')
-            trackids.append(tid)
+        elif l.startswith('https://open.spotify.com/embed/track/'):
+            tid = l.replace('https://open.spotify.com/embed/track/', '')
+        elif l.startswith('<iframe src="https://open.spotify.com/embed/track/'):
+            m = ifpat.match(l)
+            if m:
+                tid = m.group(1)
         else:
             continue
+        trackids.append(tid)
     return trackids
 
 

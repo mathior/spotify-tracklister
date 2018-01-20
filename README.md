@@ -14,8 +14,8 @@ prints a title/album/artist table.
 
 
 ## Requirements
-- Python 2.7
-- cURL
+- Python 2.7+, 3.0+
+- requests
 
 
 ## Howto
