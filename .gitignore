@@ -2,3 +2,4 @@
 auth.token
 example/*
 *json
+.idea/
