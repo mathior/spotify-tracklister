@@ -17,9 +17,8 @@ request.
 
 class TracksProcessor(object):
 
-    def __init__(self, token, name):
+    def __init__(self, token):
         self.__token = token
-        self.__name = name
 
     def extract(self, jsondata):
         tracks = jsondata['tracks']
@@ -72,32 +71,99 @@ class TracksProcessor(object):
             trackids.append(tid)
         return trackids
 
-    def processfile(self, tracklistfile, saveraw=False):
-        tids = self.loadtrackids(tracklistfile)
 
-        response = self.loadtracksdata(tids)
-        if not response:
-            sys.exit(1)
-        if saveraw:
-            savejson(response, self.__name + '_raw.json')
+class PlaylistProcessor(object):
 
-        return self.extract(response)
+    # TODO: support paging in playlists
+
+    def __init__(self, token):
+        self.__token = token
+
+    def extract(self, jsondata):
+
+        d = {
+            'name': jsondata['name'],
+            'description': jsondata['description'],
+            'owner': jsondata['owner']['id'],
+            'uri': jsondata['uri'],
+        }
+
+        tracks = []
+        for e in jsondata['tracks']['items']:
+            t = e['track']
+            td = {
+                'title': t['name'],
+                'artist': [a['name'] for a in t['artists']],
+                'album': t['album']['name'],
+                'tracknum': t['track_number'],
+                'discnum': t['disc_number'],
+                'duration': t['duration_ms'],
+                'explicit': t['explicit'],
+                'uri': t['uri'],
+            }
+            tracks.append(td)
+
+        d['tracks'] = tracks
+
+        return d
+
+    def loadplaylistdata(self, playlist):
+
+        # possible playlist values:
+        # https://api.spotify.com/v1/users/joshschwaa/playlists/5kp8ZfRfhRzqJTpl5lpQeW
+        # https://open.spotify.com/user/joshschwaa/playlist/5kp8ZfRfhRzqJTpl5lpQeW
+        # spotify:user:joshschwaa:playlist:5kp8ZfRfhRzqJTpl5lpQeW
+
+        urlpat = 'https://api.spotify.com/v1/users/{}/playlists/{}'
+        url = None
+        if playlist.startswith('https://api.spotify.com/v1/'):
+            url = playlist
+        else:
+            if playlist.startswith('https://open.spotify.com/user/'):
+                openurl = re.compile('.*user/(?P<user>.*?)/playlist/(?P<plid>.*)')
+                m = openurl.match(playlist)
+            elif playlist.startswith('spotify:'):
+                uri = re.compile('spotify:user:(?P<user>.*?):playlist:(?P<plid>.*)')
+                m = uri.match(playlist)
+            if m:
+                url = urlpat.format(
+                    m.groupdict()['user'], m.groupdict()['plid'])
+
+        if not url:
+            raise Exception('no API URL')
+
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': 'Bearer {}'.format(self.__token)}
+        res = requests.get(url, headers=headers)
+        if res.status_code == 200:
+            return res.json()
+        else:
+            print('Error while loading playlist: {} {}'.format(res.status_code, res.reason))
+            print(res.text)
+
 
 
 class TablePrinter(object):
 
-    def __init__(self, printfields, multifields=None):
+    def __init__(self, tracktablefields, multifields=None):
         # printfields defines what and in which order should be printed
         # printfields defines fields with more than one possible value
-        self.__printfields = printfields
+        self.__tracktablefields = tracktablefields
         self.__multifields = multifields if multifields else []
+        self.__tracksfieldname = 'tracks'  # tracks key in a playlist
 
-    def printtable(self, data):
+    def printplaylist(self, data, playlistfields=('name', 'description', 'owner', 'uri')):
+        for f in playlistfields:
+            print('# {}'.format(data[f]))
+        self.printtracktable(data[self.__tracksfieldname])
+
+    def printtracktable(self, data):
         out = []
-        maxlen = [0] * len(self.__printfields)
+        maxlen = [0] * len(self.__tracktablefields)
         for d in data:
             l = []
-            for i, f in enumerate(self.__printfields):
+            for i, f in enumerate(self.__tracktablefields):
                 val = d[f]
                 if f in self.__multifields:
                     s = (', '.join(val))
@@ -108,9 +174,9 @@ class TablePrinter(object):
                 maxlen[i] = vallen if vallen > maxlen[i] else maxlen[i]
             out.append(l)
         header = [f.capitalize().ljust(maxlen[i], ' ')
-                  for i, f in enumerate(self.__printfields)]
+                  for i, f in enumerate(self.__tracktablefields)]
         print(' | '.join(header))
-        hline = ['-' * maxlen[i] for i, _ in enumerate(self.__printfields)]
+        hline = ['-' * maxlen[i] for i, _ in enumerate(self.__tracktablefields)]
         print('---'.join(hline))
         for outline in out:
             l = [f.ljust(maxlen[i], ' ') for i, f in enumerate(outline)]
@@ -127,6 +193,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Extracts some information from the JSON result of an Spotify API tracks request.')
     parser.add_argument('-t', '--token', dest='token', help='OAuth token (obtained from Spotify)')
     parser.add_argument('-l', '--tracklistfile', dest='tracklistfile', help='a file listing Spotify track URIs or links')
+    parser.add_argument('-p', '--playlist', dest='playlist', help='a Spotify playlist URI or URL')
     parser.add_argument('-n', '--name', dest='name', help='(optional) filename for output files')
     parser.add_argument('-r', '--saveraw', dest='saveraw', action='store_true', help='(optional flag) save raw API response')
 
@@ -144,19 +211,39 @@ if __name__ == '__main__':
         token = args.token
 
     tracklistfile = args.tracklistfile
-    if not tracklistfile:
+    playlist = args.playlist
+    if not tracklistfile and not playlist:
+        print('missing tracklist file argument or playlist URI/URL')
         parser.print_help()
         sys.exit(0)
 
     ts = time.strftime('%Y-%m-%dT%H:%M:%S%Z', time.localtime())
     outname = ('{}_{}'.format(args.name, ts)
                if args.name
-               else 'spotify-tracks_{}'.format(ts))
-
-    tp = TracksProcessor(token, outname)
-    e = tp.processfile(tracklistfile, saveraw=args.saveraw)
+               else 'spotify-list_{}'.format(ts))
 
     printer = TablePrinter(['title', 'album', 'artist'], multifields=['artist'])
-    printer.printtable(e)
 
-    savejson(e, outname + '.json', True)
+    if tracklistfile:
+        tp = TracksProcessor(token)
+        tids = tp.loadtrackids(tracklistfile)
+        response = tp.loadtracksdata(tids)
+        if not response:
+            sys.exit(1)
+        if args.saveraw:
+            savejson(response, outname + '_raw.json')
+
+        extracted = tp.extract(response)
+        printer.printtracktable(extracted)
+
+    elif playlist:
+        pp = PlaylistProcessor(token)
+        response = pp.loadplaylistdata(playlist)
+        extracted = pp.extract(response)
+        if not response:
+            sys.exit(1)
+        if args.saveraw:
+            savejson(response, outname + '_raw.json')
+        printer.printplaylist(extracted)
+
+    savejson(extracted, outname + '.json', True)
