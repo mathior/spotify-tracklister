@@ -155,7 +155,7 @@ class TablePrinter(object):
 
     def printplaylist(self, data, playlistfields=('name', 'description', 'owner', 'uri')):
         for f in playlistfields:
-            print('# {}'.format(data[f]))
+            print('# {}: {}'.format(f, data[f]))
         self.printtracktable(data[self.__tracksfieldname])
 
     def printtracktable(self, data):
