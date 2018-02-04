@@ -5,6 +5,7 @@ import json
 import time
 import requests
 import re
+import argparse
 
 """Extracts some information from the JSON result of an Spotify API tracks
 request.
@@ -16,7 +17,7 @@ request.
 
 class TracksProcessor(object):
 
-    def __init__(self, token, name=None):
+    def __init__(self, token, name):
         self.__token = token
         self.__name = name
 
@@ -78,11 +79,7 @@ class TracksProcessor(object):
         if not response:
             sys.exit(1)
         if saveraw:
-            ts = time.strftime('%Y-%m-%dT%H:%M:%S%Z', time.localtime())
-            fn = ('{}_{}_raw.json'.format(self.__name, ts)
-                  if self.__name
-                  else 'spotify-tracks_{}_raw.json'.format(ts))
-            savejson(response, fn)
+            savejson(response, self.__name + '_raw.json')
 
         return self.extract(response)
 
@@ -126,20 +123,40 @@ def savejson(jsondata, filename, sort_keys=False):
 
 
 if __name__ == '__main__':
-    tracklistfile = sys.argv[1]
-    
-    try:
-        with open('auth.token') as f:
-            token = f.readline().strip()
-    except IOError as e:
-        token = sys.argv[2]
-    
-    ts = time.strftime('%Y-%m-%dT%H:%M:%S%Z', time.localtime())
 
-    tp = TracksProcessor(token)
-    e = tp.processfile(tracklistfile, saveraw=True)
+    parser = argparse.ArgumentParser(description='Extracts some information from the JSON result of an Spotify API tracks request.')
+    parser.add_argument('-t', '--token', dest='token', help='OAuth token (obtained from Spotify)')
+    parser.add_argument('-l', '--tracklistfile', dest='tracklistfile', help='a file listing Spotify track URIs or links')
+    parser.add_argument('-n', '--name', dest='name', help='(optional) filename for output files')
+    parser.add_argument('-r', '--saveraw', dest='saveraw', action='store_true', help='(optional flag) save raw API response')
+
+    args = parser.parse_args()
+
+    if not args.token:
+        try:
+            with open('auth.token') as f:
+                token = f.readline().strip()
+        except IOError as e:
+            print('missing token argument and "auth.token" file')
+            parser.print_help()
+            sys.exit(0)
+    else:
+        token = args.token
+
+    tracklistfile = args.tracklistfile
+    if not tracklistfile:
+        parser.print_help()
+        sys.exit(0)
+
+    ts = time.strftime('%Y-%m-%dT%H:%M:%S%Z', time.localtime())
+    outname = ('{}_{}'.format(args.name, ts)
+               if args.name
+               else 'spotify-tracks_{}'.format(ts))
+
+    tp = TracksProcessor(token, outname)
+    e = tp.processfile(tracklistfile, saveraw=args.saveraw)
 
     printer = TablePrinter(['title', 'album', 'artist'], multifields=['artist'])
     printer.printtable(e)
 
-    savejson(e, 'spotify-tracks_{}.json'.format(ts), True)
+    savejson(e, outname + '.json', True)
