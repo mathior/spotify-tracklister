@@ -23,11 +23,15 @@ prints a title/album/artist table.
 - add an auth token into a file named auth.token (see below how to get a token)
 - run the command
 
-$ python stl.py tracks.txt
+$ python stl.py -l -i tracks.txt
 
 - this will print a table with title/album/artist information to stdout and also
-write two json files named "spotify-tracks\_\<datetime\>.json" and 
-"spotify-tracks\_\<datetime\>\_raw.json"
+write a json files named "spotify-tracks\_\<datetime\>.json"
+
+- to print a playlist just pass a playlist URL (can be obtained from the Spotify app: right click > Share > Copy Playlist Link)
+
+$ python stl.py -i https://open.spotify.com/user/myusername/playlist/3jZmUF8dQOIrMErfdxMfDP
+
 
 
 ## Howto receive OAuth token
