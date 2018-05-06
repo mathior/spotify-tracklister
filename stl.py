@@ -68,6 +68,9 @@ class TracksProcessor(object):
                     tid = m.group(1)
             else:
                 continue
+            if '?' in tid:
+                # remove query parameters from urls
+                tid = tid[:tid.find('?')]
             trackids.append(tid)
         return trackids
 
@@ -125,6 +128,8 @@ class PlaylistProcessor(object):
             elif playlist.startswith('spotify:'):
                 uri = re.compile('spotify:user:(?P<user>.*?):playlist:(?P<plid>.*)')
                 m = uri.match(playlist)
+            else:
+                raise Exception('{} is not a playlist URL/URL'.format(playlist))
             if m:
                 url = urlpat.format(
                     m.groupdict()['user'], m.groupdict()['plid'])
@@ -193,12 +198,16 @@ if __name__ == '__main__':
         description='Extracts some information from the JSON result of an Spotify API tracks request.')
     parser.add_argument(
         '-t', '--token', dest='token', help='OAuth token (obtained from Spotify)')
+    parser.add_argument('-i', '--input', dest='input', help='Input URI/URL/file', required=True)
     parser.add_argument(
-        '-l', '--tracklistfile', dest='tracklistfile', help='a file listing Spotify track URIs or links')
-    parser.add_argument('-p', '--playlist', dest='playlist', help='a Spotify playlist URI or URL')
-    parser.add_argument('-n', '--name', dest='name', help='(optional) filename for output files')
+        '-l', '--tracklistmode', dest='tracklistmode', action='store_true',
+        help='Input is a file listing Spotify track URIs or links instead of a playlist  URI or URL')
+    parser.add_argument(
+        '-R', '--from-raw', dest='fromraw', action='store_true',
+        help='Input is a saved raw API response that should be print as table')
     parser.add_argument(
         '-r', '--saveraw', dest='saveraw', action='store_true', help='(optional flag) save raw API response')
+    parser.add_argument('-n', '--name', dest='name', help='(optional) filename for output files')
 
     args = parser.parse_args()
 
@@ -213,40 +222,51 @@ if __name__ == '__main__':
     else:
         token = args.token
 
-    tracklistfile = args.tracklistfile
-    playlist = args.playlist
-    if not tracklistfile and not playlist:
-        print('missing tracklist file argument or playlist URI/URL')
-        parser.print_help()
-        sys.exit(0)
+    inputval = args.input
+    fromraw = args.fromraw
 
-    ts = time.strftime('%Y-%m-%dT%H:%M:%S%Z', time.localtime())
+    ts = time.strftime('%Y-%m-%dT%H%M%S%Z', time.localtime())
     outname = ('{}_{}'.format(args.name, ts)
                if args.name
                else 'spotify-list_{}'.format(ts))
 
     printer = TablePrinter(['title', 'album', 'artist'], multifields=['artist'])
 
-    if tracklistfile:
+    if args.tracklistmode:
         tp = TracksProcessor(token)
-        tids = tp.loadtrackids(tracklistfile)
-        response = tp.loadtracksdata(tids)
-        if not response:
-            sys.exit(1)
-        if args.saveraw:
-            savejson(response, outname + '_raw.json')
 
-        extracted = tp.extract(response)
+        if fromraw:
+            rawapiresponse = json.loads(open(inputval).read())
+            extracted = tp.extract(rawapiresponse)
+        else:
+            tids = tp.loadtrackids(inputval)
+            response = tp.loadtracksdata(tids)
+            if not response:
+                sys.exit(1)
+            if args.saveraw:
+                savejson(response, outname + '_raw.json')
+            extracted = tp.extract(response)
+            savejson(extracted, outname + '.json', True)
         printer.printtracktable(extracted)
-
-    elif playlist:
+    else:
         pp = PlaylistProcessor(token)
-        response = pp.loadplaylistdata(playlist)
-        extracted = pp.extract(response)
-        if not response:
-            sys.exit(1)
-        if args.saveraw:
-            savejson(response, outname + '_raw.json')
+        if fromraw:
+            rawapiresponse = json.loads(open(inputval).read())
+            try:
+                extracted = pp.extract(rawapiresponse)
+            except KeyError:
+                print('{} is not a raw playlist (try -l for tracklist mode)'.format(inputval))
+                sys.exit(1)
+        else:
+            try:
+                response = pp.loadplaylistdata(inputval)
+            except Exception as e:
+                print(e.message)
+                sys.exit(1)
+            if not response:
+                sys.exit(1)
+            if args.saveraw:
+                savejson(response, outname + '_raw.json')
+            extracted = pp.extract(response)
+            savejson(extracted, outname + '.json', True)
         printer.printplaylist(extracted)
-
-    savejson(extracted, outname + '.json', True)
