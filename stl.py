@@ -143,12 +143,11 @@ class PlaylistProcessor(object):
             print(res.text)
 
 
-
 class TablePrinter(object):
 
     def __init__(self, tracktablefields, multifields=None):
-        # printfields defines what and in which order should be printed
-        # printfields defines fields with more than one possible value
+        # tracktablefields defines what and in which order should be printed
+        # multifields defines fields with more than one possible value
         self.__tracktablefields = tracktablefields
         self.__multifields = multifields if multifields else []
         self.__tracksfieldname = 'tracks'  # tracks key in a playlist
@@ -190,12 +189,16 @@ def savejson(jsondata, filename, sort_keys=False):
 
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser(description='Extracts some information from the JSON result of an Spotify API tracks request.')
-    parser.add_argument('-t', '--token', dest='token', help='OAuth token (obtained from Spotify)')
-    parser.add_argument('-l', '--tracklistfile', dest='tracklistfile', help='a file listing Spotify track URIs or links')
+    parser = argparse.ArgumentParser(
+        description='Extracts some information from the JSON result of an Spotify API tracks request.')
+    parser.add_argument(
+        '-t', '--token', dest='token', help='OAuth token (obtained from Spotify)')
+    parser.add_argument(
+        '-l', '--tracklistfile', dest='tracklistfile', help='a file listing Spotify track URIs or links')
     parser.add_argument('-p', '--playlist', dest='playlist', help='a Spotify playlist URI or URL')
     parser.add_argument('-n', '--name', dest='name', help='(optional) filename for output files')
-    parser.add_argument('-r', '--saveraw', dest='saveraw', action='store_true', help='(optional flag) save raw API response')
+    parser.add_argument(
+        '-r', '--saveraw', dest='saveraw', action='store_true', help='(optional flag) save raw API response')
 
     args = parser.parse_args()
 
