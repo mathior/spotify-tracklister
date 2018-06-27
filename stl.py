@@ -77,8 +77,6 @@ class TracksProcessor(object):
 
 class PlaylistProcessor(object):
 
-    # TODO: support paging in playlists
-
     def __init__(self, token):
         self.__token = token
 
@@ -89,6 +87,7 @@ class PlaylistProcessor(object):
             'description': jsondata['description'],
             'owner': jsondata['owner']['id'],
             'uri': jsondata['uri'],
+            'total': jsondata['tracks']['total'],
         }
 
         tracks = []
@@ -137,15 +136,26 @@ class PlaylistProcessor(object):
         if not url:
             raise Exception('no API URL')
 
+        pljson = self._load(url)
+        nexturl = pljson['tracks']['next']
+        # nexturl is null when the playlist is not paged
+        while nexturl:
+            nextjson = self._load(nexturl)
+            items = nextjson['items']  # with offset there is no 'tracks' field
+            pljson['tracks']['items'].extend(items)
+            nexturl = nextjson['next']
+        return pljson
+
+    def _load(self, url):
         headers = {
             'Accept': 'application/json',
             'Authorization': 'Bearer {}'.format(self.__token)}
         res = requests.get(url, headers=headers)
-        if res.status_code == 200:
-            return res.json()
-        else:
+        if res.status_code != 200:
             print('Error while loading playlist: {} {}'.format(res.status_code, res.reason))
             print(res.text)
+            raise Exception('Error while loading playlist')
+        return res.json()
 
 
 class TablePrinter(object):
@@ -157,7 +167,7 @@ class TablePrinter(object):
         self.__multifields = multifields if multifields else []
         self.__tracksfieldname = 'tracks'  # tracks key in a playlist
 
-    def printplaylist(self, data, playlistfields=('name', 'description', 'owner', 'uri')):
+    def printplaylist(self, data, playlistfields=('name', 'description', 'owner', 'uri', 'total')):
         for f in playlistfields:
             print('# {}: {}'.format(f, data[f]))
         self.printtracktable(data[self.__tracksfieldname])
