@@ -24,7 +24,7 @@ prints a title/album/artist table.
 - add song links or track URI's to a text file (e.g. "tracks.txt"), one per line
 - run the command
 ```
-$ ./stl -l -i tracks.txt
+$ ./stl -T -i tracks.txt
 ```
 
 - this will print a table with title/album/artist information to stdout and also
@@ -70,11 +70,11 @@ Either both of `ClientID`, `ClientSecret` or an `AccessToken` must be present.
 ### UnicodeDecodeError
 - UnicodeDecodeError while trying to write the output to a file:
 ```
-$ ./stl -l -i tracks.txt >out.txt
+$ ./stl -T -i tracks.txt >out.txt
 ...
 UnicodeEncodeError: 'ascii' codec can't encode character u'\xfc' in position 46: ordinal not in range(128)
 ```
 - set env variable `PYTHONIOENCODING`:
 ```
-$ PYTHONIOENCODING=UTF-8 ./stl -l -i tracks.txt >out.txt
+$ PYTHONIOENCODING=UTF-8 ./stl -T -i tracks.txt >out.txt
 ```
