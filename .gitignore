@@ -1,5 +1,5 @@
 *~
-auth.token
+credentials.ini
 example/*
 *json
 .idea/
