@@ -6,21 +6,117 @@ import time
 import requests
 import re
 import argparse
+import base64
+import logging
 
-"""Extracts some information from the JSON result of an Spotify API tracks
-request.
+
+"""Extracts some information from the JSON result of an Spotify API tracks request.
 """
 
-# create a token in the console:
-# https://developer.spotify.com/web-api/console/get-several-tracks/
+
+class Auth(object):
+    def __init__(self, credentialsfilename):
+        self._clientid = None
+        self._clientsecret = None
+        self._accesstoken = None
+        self._tokenexpiretime = None
+        try:
+            # Python 2.7
+            import ConfigParser
+            cp = ConfigParser.ConfigParser()
+            try:
+                cp.read(credentialsfilename)
+            except ConfigParser.MissingSectionHeaderError as e:
+                logging.error('missing section "spotify" in {}'.format(credentialsfilename))
+                raise e
+            if not cp.has_section('spotify'):
+                logging.error('missing section "spotify" in {}'.format(credentialsfilename))
+                raise Exception
+            if cp.has_option('spotify', 'ClientID'):
+                self._clientid = cp.get('spotify', 'ClientID')
+            if cp.has_option('spotify', 'ClientSecret'):
+                self._clientsecret = cp.get('spotify', 'ClientSecret')
+            if self._clientid is None and self._clientsecret is None:
+                if cp.has_option('spotify', 'AccessToken'):
+                    self._accesstoken = cp.get('spotify', 'AccessToken')
+                    # assume the token was just created and is valid for the next 55 minutes
+                    self._tokenexpiretime = int(time.time()) + (55 * 60)
+        except ImportError:
+            # Python 3.x
+            import configparser
+            cp = configparser.ConfigParser()
+            try:
+                cp.read(credentialsfilename)
+            except configparser.MissingSectionHeaderError as e:
+                logging.error('missing section "spotify" in {}'.format(credentialsfilename))
+                raise e
+            if 'spotify' not in cp:
+                logging.error('missing section "spotify" in {}'.format(credentialsfilename))
+                raise Exception
+            if 'ClientID' in cp['spotify']:
+                self._clientid = cp['spotify']['ClientID']
+            if 'ClientSecret' in cp['spotify']:
+                self._clientsecret = cp['spotify']['ClientSecret']
+            if self._clientid is None and self._clientsecret is None:
+                if 'AccessToken' in cp['spotify']:
+                    self._accesstoken = cp['spotify']['AccessToken']
+                    # assume the token was just created and is valid for the next 55 minutes
+                    self._tokenexpiretime = int(time.time()) + (55 * 60)
+
+        if self._accesstoken is None and (self._clientid is None or self._clientsecret is None):
+            logging.error('AccessToken or ClientID/ClientSecret missing in {}'.format(credentialsfilename))
+            raise Exception
+
+    @property
+    def clientid(self):
+        return self._clientid
+
+    @property
+    def clientsecret(self):
+        return self._clientsecret
+
+    @property
+    def accesstoken(self):
+        return self._accesstoken
+
+    def hasvalidaccesstoken(self):
+        return self.accesstoken is not None and self._tokenexpiretime is not None and self._tokenexpiretime > int(time.time())
+
+    def authenticate(self):
+        url = 'https://accounts.spotify.com/api/token'
+        data = {'grant_type': 'client_credentials'}
+        try:
+            # Python 2.7
+            b64cred = base64.b64encode('{}:{}'.format(self._clientid, self._clientsecret))
+        except TypeError:
+            # Python 3.x
+            s = '{}:{}'.format(self._clientid, self._clientsecret)
+            b64cred = base64.b64encode(s.encode('utf8')).decode('utf8')
+        headers = {'Authorization': 'Basic {}'.format(b64cred)}
+        res = requests.post(url, data=data, headers=headers)
+        if res.status_code != 200:
+            logging.error('couldn\'t authenticate, status code: {} {}\n{}'.format(res.status_code, res.reason, res.text))
+            return False
+        j = json.loads(res.text)
+        if 'error' in j:
+            logging.error('couldn\'t authenticate: {}'.format(res.text))
+            return False
+        if 'access_token' not in j or 'expires_in' not in j:
+            logging.error('auth response missing "access_token" and/or "expires_in": {}'.format(res.text))
+            return False
+        self._accesstoken = j['access_token']
+        self._tokenexpiretime = int(time.time()) + int(j['expires_in'])
+        logging.debug('received token {}, expires at {}'.format(self._accesstoken, self._tokenexpiretime))
+        return True
 
 
 class TracksProcessor(object):
 
-    def __init__(self, token):
-        self.__token = token
+    def __init__(self, auth):
+        self._auth = auth
 
-    def extract(self, jsondata):
+    @staticmethod
+    def extract(jsondata):
         tracks = jsondata['tracks']
         extracted = []
         for t in tracks:
@@ -37,20 +133,8 @@ class TracksProcessor(object):
             extracted.append(d)
         return extracted
 
-    def loadtracksdata(self, trackidlist):
-        ids = ','.join(trackidlist)
-        url = 'https://api.spotify.com/v1/tracks?ids={}'.format(ids)
-        headers = {
-            'Accept': 'application/json',
-            'Authorization': 'Bearer {}'.format(self.__token)}
-        res = requests.get(url, headers=headers)
-        if res.status_code == 200:
-            return res.json()
-        else:
-            print('Error while loading tracks: {} {}'.format(res.status_code, res.reason))
-            print(res.text)
-
-    def loadtrackids(self, filename):
+    @staticmethod
+    def loadtrackids(filename):
         with open(filename) as f:
             lines = [l.strip() for l in f.readlines() if l.strip()]
         trackids = []
@@ -66,6 +150,8 @@ class TracksProcessor(object):
                 m = ifpat.match(l)
                 if m:
                     tid = m.group(1)
+                else:
+                    continue
             else:
                 continue
             if '?' in tid:
@@ -74,13 +160,28 @@ class TracksProcessor(object):
             trackids.append(tid)
         return trackids
 
+    def loadtracksdata(self, trackidlist):
+        ids = ','.join(trackidlist)
+        url = 'https://api.spotify.com/v1/tracks?ids={}'.format(ids)
+        if not self._auth.hasvalidaccesstoken() and not self._auth.authenticate():
+            return
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': 'Bearer {}'.format(self._auth.accesstoken)}
+        res = requests.get(url, headers=headers)
+        if res.status_code == 200:
+            return res.json()
+        else:
+            logging.error('couldn\'t load tracks: {} {}\n{}'.format(res.status_code, res.reason, res.text))
+
 
 class PlaylistProcessor(object):
 
-    def __init__(self, token):
-        self.__token = token
+    def __init__(self, auth):
+        self._auth = auth
 
-    def extract(self, jsondata):
+    @staticmethod
+    def extract(jsondata):
 
         d = {
             'name': jsondata['name'],
@@ -110,12 +211,10 @@ class PlaylistProcessor(object):
         return d
 
     def loadplaylistdata(self, playlist):
-
         # possible playlist values:
         # https://api.spotify.com/v1/users/joshschwaa/playlists/5kp8ZfRfhRzqJTpl5lpQeW
         # https://open.spotify.com/user/joshschwaa/playlist/5kp8ZfRfhRzqJTpl5lpQeW
         # spotify:user:joshschwaa:playlist:5kp8ZfRfhRzqJTpl5lpQeW
-
         urlpat = 'https://api.spotify.com/v1/users/{}/playlists/{}'
         url = None
         if playlist.startswith('https://api.spotify.com/v1/'):
@@ -137,24 +236,29 @@ class PlaylistProcessor(object):
             raise Exception('no API URL')
 
         pljson = self._load(url)
+        if not pljson:
+            return
         nexturl = pljson['tracks']['next']
         # nexturl is null when the playlist is not paged
         while nexturl:
             nextjson = self._load(nexturl)
+            if not nextjson:
+                break
             items = nextjson['items']  # with offset there is no 'tracks' field
             pljson['tracks']['items'].extend(items)
             nexturl = nextjson['next']
         return pljson
 
     def _load(self, url):
+        if not self._auth.hasvalidaccesstoken() and not self._auth.authenticate():
+            return
         headers = {
             'Accept': 'application/json',
-            'Authorization': 'Bearer {}'.format(self.__token)}
+            'Authorization': 'Bearer {}'.format(self._auth.accesstoken)}
         res = requests.get(url, headers=headers)
         if res.status_code != 200:
-            print('Error while loading playlist: {} {}'.format(res.status_code, res.reason))
-            print(res.text)
-            raise Exception('Error while loading playlist')
+            logging.error('couldn\'t load playlist: {} {}\n{}'.format(res.status_code, res.reason, res.text))
+            return
         return res.json()
 
 
@@ -203,34 +307,35 @@ def savejson(jsondata, filename, sort_keys=False):
 
 
 if __name__ == '__main__':
-
     parser = argparse.ArgumentParser(
         description='Extracts some information from the JSON result of an Spotify API tracks request.')
-    parser.add_argument(
-        '-t', '--token', dest='token', help='OAuth token (obtained from Spotify)')
+    parser.add_argument('-c', '--credentials', default='credentials.ini', help='Path to credentials file.')
     parser.add_argument('-i', '--input', dest='input', help='Input URI/URL/file', required=True)
     parser.add_argument(
         '-l', '--tracklistmode', dest='tracklistmode', action='store_true',
-        help='Input is a file listing Spotify track URIs or links instead of a playlist  URI or URL')
+        help='Input is a file listing Spotify track URIs or links instead of a playlist URI or URL')
     parser.add_argument(
         '-R', '--from-raw', dest='fromraw', action='store_true',
         help='Input is a saved raw API response that should be print as table')
     parser.add_argument(
-        '-r', '--saveraw', dest='saveraw', action='store_true', help='(optional flag) save raw API response')
-    parser.add_argument('-n', '--name', dest='name', help='(optional) filename for output files')
+        '-r', '--saveraw', dest='saveraw', action='store_true', help='(optional flag) Save raw API response')
+    parser.add_argument('-n', '--name', dest='name', help='(optional) Filename for output files')
+    parser.add_argument('-D', '--debug', help='Activate debug logging', default=False, action='store_true')
 
     args = parser.parse_args()
 
-    if not args.token:
-        try:
-            with open('auth.token') as f:
-                token = f.readline().strip()
-        except IOError as e:
-            print('missing token argument and "auth.token" file')
-            parser.print_help()
-            sys.exit(0)
+    if args.debug:
+        loglevel = logging.DEBUG
     else:
-        token = args.token
+        loglevel = logging.INFO
+    logging.basicConfig(
+        format='%(asctime)s %(levelname)s %(message)s',
+        datefmt='%Y-%m-%dT%H:%M:%S',
+        level=loglevel)
+
+    auth = Auth(args.credentials)
+    if not auth.hasvalidaccesstoken() and not auth.authenticate():
+        sys.exit(1)
 
     inputval = args.input
     fromraw = args.fromraw
@@ -243,40 +348,40 @@ if __name__ == '__main__':
     printer = TablePrinter(['title', 'album', 'artist'], multifields=['artist'])
 
     if args.tracklistmode:
-        tp = TracksProcessor(token)
+        tp = TracksProcessor(auth)
 
         if fromraw:
             rawapiresponse = json.loads(open(inputval).read())
-            extracted = tp.extract(rawapiresponse)
+            extracted = TracksProcessor.extract(rawapiresponse)
         else:
-            tids = tp.loadtrackids(inputval)
+            tids = TracksProcessor.loadtrackids(inputval)
             response = tp.loadtracksdata(tids)
             if not response:
                 sys.exit(1)
             if args.saveraw:
                 savejson(response, outname + '_raw.json')
-            extracted = tp.extract(response)
+            extracted = TracksProcessor.extract(response)
             savejson(extracted, outname + '.json', True)
         printer.printtracktable(extracted)
     else:
-        pp = PlaylistProcessor(token)
+        pp = PlaylistProcessor(auth)
         if fromraw:
             rawapiresponse = json.loads(open(inputval).read())
             try:
-                extracted = pp.extract(rawapiresponse)
+                extracted = PlaylistProcessor.extract(rawapiresponse)
             except KeyError:
-                print('{} is not a raw playlist (try -l for tracklist mode)'.format(inputval))
+                logging.error('{} is not a raw playlist (try -l for tracklist mode)'.format(inputval))
                 sys.exit(1)
         else:
             try:
                 response = pp.loadplaylistdata(inputval)
             except Exception as e:
-                print(e.message)
+                logging.error(e.message)
                 sys.exit(1)
             if not response:
                 sys.exit(1)
             if args.saveraw:
                 savejson(response, outname + '_raw.json')
-            extracted = pp.extract(response)
+            extracted = PlaylistProcessor.extract(response)
             savejson(extracted, outname + '.json', True)
         printer.printplaylist(extracted)
