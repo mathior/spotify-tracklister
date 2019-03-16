@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 
+
+from __future__ import print_function
+
 import sys
 import json
 import time
@@ -8,6 +11,7 @@ import re
 import argparse
 import base64
 import logging
+import codecs
 
 
 """Extracts some information from the JSON result of an Spotify API tracks request.
@@ -271,12 +275,12 @@ class TablePrinter(object):
         self.__multifields = multifields if multifields else []
         self.__tracksfieldname = 'tracks'  # tracks key in a playlist
 
-    def printplaylist(self, data, playlistfields=('name', 'description', 'owner', 'uri', 'total')):
+    def printplaylist(self, data, playlistfields=('name', 'description', 'owner', 'uri', 'total'), printto=sys.stdout):
         for f in playlistfields:
-            print('# {}: {}'.format(f, data[f]))
-        self.printtracktable(data[self.__tracksfieldname])
+            print('# {}: {}'.format(f, data[f]), file=printto)
+        self.printtracktable(data[self.__tracksfieldname], printto)
 
-    def printtracktable(self, data):
+    def printtracktable(self, data, printto=sys.stdout):
         out = []
         maxlen = [0] * len(self.__tracktablefields)
         for d in data:
@@ -293,12 +297,12 @@ class TablePrinter(object):
             out.append(l)
         header = [f.capitalize().ljust(maxlen[i], ' ')
                   for i, f in enumerate(self.__tracktablefields)]
-        print(' | '.join(header))
+        print(' | '.join(header), file=printto)
         hline = ['-' * maxlen[i] for i, _ in enumerate(self.__tracktablefields)]
-        print('---'.join(hline))
+        print('---'.join(hline), file=printto)
         for outline in out:
             l = [f.ljust(maxlen[i], ' ') for i, f in enumerate(outline)]
-            print(' | '.join(l))
+            print(' | '.join(l), file=printto)
 
 
 def savejson(jsondata, filename, sort_keys=False):
@@ -312,15 +316,21 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--credentials', default='credentials.ini', help='Path to credentials file.')
     parser.add_argument('-i', '--input', dest='input', help='Input URI/URL/file', required=True)
     parser.add_argument(
-        '-l', '--tracklistmode', dest='tracklistmode', action='store_true',
-        help='Input is a file listing Spotify track URIs or links instead of a playlist URI or URL')
+        '-T', '--tracklistmode', dest='tracklistmode', action='store_true',
+        help='Input is a file listing Spotify track URIs or links instead of a playlist URI or URL.')
+    parser.add_argument(
+        '-P', '--playlist-list-mode', dest='pllmode', action='store_true',
+        help='Input is a file listing Spotify playlist URIs or links instead of a single playlist.'
+             'In this mode the tables are saved instead of printed, filenames are determined by listed playlist names.')
     parser.add_argument(
         '-R', '--from-raw', dest='fromraw', action='store_true',
-        help='Input is a saved raw API response that should be print as table')
+        help='Input is a saved raw API response that should be print as table.')
     parser.add_argument(
-        '-r', '--saveraw', dest='saveraw', action='store_true', help='(optional flag) Save raw API response')
-    parser.add_argument('-n', '--name', dest='name', help='(optional) Filename for output files')
-    parser.add_argument('-D', '--debug', help='Activate debug logging', default=False, action='store_true')
+        '-r', '--saveraw', action='store_true', help='(optional flag) Save raw API response.')
+    parser.add_argument(
+        '-s', '--savejson', action='store_true', help='(optional flag) Save extracted json data.')
+    parser.add_argument('-n', '--name', dest='name', help='(optional) Filename for output files.')
+    parser.add_argument('-D', '--debug', help='Activate debug logging', action='store_true')
 
     args = parser.parse_args()
 
@@ -337,9 +347,6 @@ if __name__ == '__main__':
     if not auth.hasvalidaccesstoken() and not auth.authenticate():
         sys.exit(1)
 
-    inputval = args.input
-    fromraw = args.fromraw
-
     ts = time.strftime('%Y-%m-%dT%H%M%S%Z', time.localtime())
     outname = ('{}_{}'.format(args.name, ts)
                if args.name
@@ -350,38 +357,54 @@ if __name__ == '__main__':
     if args.tracklistmode:
         tp = TracksProcessor(auth)
 
-        if fromraw:
-            rawapiresponse = json.loads(open(inputval).read())
+        if args.fromraw:
+            rawapiresponse = json.loads(open(args.input).read())
             extracted = TracksProcessor.extract(rawapiresponse)
         else:
-            tids = TracksProcessor.loadtrackids(inputval)
+            tids = TracksProcessor.loadtrackids(args.input)
             response = tp.loadtracksdata(tids)
             if not response:
                 sys.exit(1)
             if args.saveraw:
                 savejson(response, outname + '_raw.json')
             extracted = TracksProcessor.extract(response)
-            savejson(extracted, outname + '.json', True)
+            if args.savejson:
+                savejson(extracted, outname + '.json', True)
         printer.printtracktable(extracted)
     else:
         pp = PlaylistProcessor(auth)
-        if fromraw:
-            rawapiresponse = json.loads(open(inputval).read())
+        if args.fromraw:
+            rawapiresponse = json.loads(open(args.input).read())
             try:
                 extracted = PlaylistProcessor.extract(rawapiresponse)
             except KeyError:
-                logging.error('{} is not a raw playlist (try -l for tracklist mode)'.format(inputval))
+                logging.error('{} is not a raw playlist (try -l for tracklist mode)'.format(args.input))
                 sys.exit(1)
+            printer.printplaylist(extracted)
         else:
-            try:
-                response = pp.loadplaylistdata(inputval)
-            except Exception as e:
-                logging.error(e.message)
-                sys.exit(1)
-            if not response:
-                sys.exit(1)
-            if args.saveraw:
-                savejson(response, outname + '_raw.json')
-            extracted = PlaylistProcessor.extract(response)
-            savejson(extracted, outname + '.json', True)
-        printer.printplaylist(extracted)
+            if args.pllmode:
+                inputlines = [l.strip() for l in open(args.input).readlines() if l.strip()]
+            else:
+                inputlines = [args.input]
+            for inputline in inputlines:
+                try:
+                    response = pp.loadplaylistdata(inputline)
+                    if args.pllmode:
+                        outname = response['name']
+                except Exception as e:
+                    logging.error(e.message)
+                    continue
+                if not response:
+                    logging.error('no playlist data for {}'.format(inputline))
+                    continue
+                if args.saveraw:
+                    savejson(response, outname + '_raw.json')
+                extracted = PlaylistProcessor.extract(response)
+                if args.savejson:
+                    savejson(extracted, outname + '.json', True)
+                if args.pllmode:
+                    logging.info('saving {}'.format(outname))
+                    with codecs.open(outname, mode='wb', encoding='utf8') as fout:
+                        printer.printplaylist(extracted, printto=fout)
+                else:
+                    printer.printplaylist(extracted)
