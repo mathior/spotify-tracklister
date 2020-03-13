@@ -219,22 +219,21 @@ class PlaylistProcessor(object):
         # https://api.spotify.com/v1/users/joshschwaa/playlists/5kp8ZfRfhRzqJTpl5lpQeW
         # https://open.spotify.com/user/joshschwaa/playlist/5kp8ZfRfhRzqJTpl5lpQeW
         # spotify:user:joshschwaa:playlist:5kp8ZfRfhRzqJTpl5lpQeW
-        urlpat = 'https://api.spotify.com/v1/users/{}/playlists/{}'
+        urlpat = 'https://api.spotify.com/v1/playlists/{}'
         url = None
-        if playlist.startswith('https://api.spotify.com/v1/'):
+        if playlist.startswith('https://api.spotify.com/v1/playlists'):
             url = playlist
         else:
-            if playlist.startswith('https://open.spotify.com/user/'):
-                openurl = re.compile('.*user/(?P<user>.*?)/playlist/(?P<plid>.*)')
+            if playlist.startswith('https://open.spotify.com/playlist/'):
+                openurl = re.compile('.*playlist/(?P<plid>.*)')
                 m = openurl.match(playlist)
-            elif playlist.startswith('spotify:'):
-                uri = re.compile('spotify:user:(?P<user>.*?):playlist:(?P<plid>.*)')
+            elif playlist.startswith('spotify:playlist:'):
+                uri = re.compile('spotify:playlist:(?P<plid>.*)')
                 m = uri.match(playlist)
             else:
-                raise Exception('{} is not a playlist URL/URL'.format(playlist))
+                raise Exception('{} is not a valid playlist URL/URI'.format(playlist))
             if m:
-                url = urlpat.format(
-                    m.groupdict()['user'], m.groupdict()['plid'])
+                url = urlpat.format(m.groupdict()['plid'])
 
         if not url:
             raise Exception('no API URL')
