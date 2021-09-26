@@ -14,9 +14,18 @@ prints a title/album/artist table.
 
 
 ## Requirements
-- Python 2.7+, 3.0+
+- Python 3.8+
 - requests
 
+Project dependencies are declared in `pyproject.toml` and fixed in `poetry.lock`,
+it's recommended to use [Poetry][] to manage the project, e.g. create a virtual 
+environment and install dependencies:
+
+    $ poetry install
+
+then run the app:
+
+    $ poetry run stl -h
 
 ## Howto
 - provide credentials or an access token in a config file
@@ -65,16 +74,4 @@ Either both of `ClientID`, `ClientSecret` or an `AccessToken` must be present.
 - copy this token to the file "credentials.ini" (AuthToken = the_new_token)
 
 
-## Troubleshooting
-
-### UnicodeDecodeError
-- UnicodeDecodeError while trying to write the output to a file:
-```
-$ ./stl -T -i tracks.txt >out.txt
-...
-UnicodeEncodeError: 'ascii' codec can't encode character u'\xfc' in position 46: ordinal not in range(128)
-```
-- set env variable `PYTHONIOENCODING`:
-```
-$ PYTHONIOENCODING=UTF-8 ./stl -T -i tracks.txt >out.txt
-```
+[Poetry]: https://python-poetry.org/
