@@ -89,10 +89,38 @@ class Auth(object):
         return True
 
 
+class RawLoader(object):
+    """ Loads a previously saved raw API response.
+    """
+    def __call__(self, filename):
+        with open(filename) as fin:
+            return json.loads(fin.read())
+
+
+class AuthenticatedLoader(object):
+    """ Loader that calls the Spotify API using Auth credentials.
+    """
+    def __init__(self, auth=None):
+        self._auth = auth
+
+    def __call__(self, url):
+        if not self._auth.hasvalidaccesstoken() and not self._auth.authenticate():
+            logging.error('unable to authenticate!')
+            return
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': 'Bearer {}'.format(self._auth.accesstoken)}
+        res = requests.get(url, headers=headers)
+        if res.status_code == 200:
+            return res.json()
+        else:
+            logging.error('couldn\'t load: {} {}\n{}'.format(res.status_code, res.reason, res.text))
+
+
 class TracksProcessor(object):
 
-    def __init__(self, auth):
-        self._auth = auth
+    def __init__(self, loader):
+        self._loader = loader
 
     @staticmethod
     def extract(jsondata):
@@ -113,7 +141,7 @@ class TracksProcessor(object):
         return extracted
 
     @staticmethod
-    def loadtrackids(filename):
+    def make_track_ids_url(filename):
         with open(filename) as f:
             lines = [l.strip() for l in f.readlines() if l.strip()]
         trackids = []
@@ -137,27 +165,16 @@ class TracksProcessor(object):
                 # remove query parameters from urls
                 tid = tid[:tid.find('?')]
             trackids.append(tid)
-        return trackids
+        return 'https://api.spotify.com/v1/tracks?ids={}'.format(','.join(trackids))
 
-    def loadtracksdata(self, trackidlist):
-        ids = ','.join(trackidlist)
-        url = 'https://api.spotify.com/v1/tracks?ids={}'.format(ids)
-        if not self._auth.hasvalidaccesstoken() and not self._auth.authenticate():
-            return
-        headers = {
-            'Accept': 'application/json',
-            'Authorization': 'Bearer {}'.format(self._auth.accesstoken)}
-        res = requests.get(url, headers=headers)
-        if res.status_code == 200:
-            return res.json()
-        else:
-            logging.error('couldn\'t load tracks: {} {}\n{}'.format(res.status_code, res.reason, res.text))
+    def loadtracksdata(self, location):
+        return self._loader(location)
 
 
 class PlaylistProcessor(object):
 
-    def __init__(self, auth):
-        self._auth = auth
+    def __init__(self, loader):
+        self._loader = loader
 
     @staticmethod
     def extract(jsondata):
@@ -190,6 +207,11 @@ class PlaylistProcessor(object):
         return d
 
     def loadplaylistdata(self, playlist):
+
+        # if we work with a RawLoader, we're loading a previously saved playlist
+        if isinstance(self._loader, RawLoader):
+            return self._loader(playlist)
+
         # possible playlist values:
         # https://api.spotify.com/v1/users/joshschwaa/playlists/5kp8ZfRfhRzqJTpl5lpQeW
         # https://open.spotify.com/user/joshschwaa/playlist/5kp8ZfRfhRzqJTpl5lpQeW
@@ -213,31 +235,19 @@ class PlaylistProcessor(object):
         if not url:
             raise Exception('no API URL')
 
-        pljson = self._load(url)
+        pljson = self._loader(url)
         if not pljson:
             return
         nexturl = pljson['tracks']['next']
         # nexturl is null when the playlist is not paged
         while nexturl:
-            nextjson = self._load(nexturl)
+            nextjson = self._loader(nexturl)
             if not nextjson:
                 break
             items = nextjson['items']  # with offset there is no 'tracks' field
             pljson['tracks']['items'].extend(items)
             nexturl = nextjson['next']
         return pljson
-
-    def _load(self, url):
-        if not self._auth.hasvalidaccesstoken() and not self._auth.authenticate():
-            return
-        headers = {
-            'Accept': 'application/json',
-            'Authorization': 'Bearer {}'.format(self._auth.accesstoken)}
-        res = requests.get(url, headers=headers)
-        if res.status_code != 200:
-            logging.error('couldn\'t load playlist: {} {}\n{}'.format(res.status_code, res.reason, res.text))
-            return
-        return res.json()
 
 
 class TablePrinter(object):
@@ -317,9 +327,13 @@ if __name__ == '__main__':
         datefmt='%Y-%m-%dT%H:%M:%S',
         level=loglevel)
 
-    auth = Auth(args.credentials)
-    if not auth.hasvalidaccesstoken() and not auth.authenticate():
-        sys.exit(1)
+    if not args.fromraw:
+        auth = Auth(args.credentials)
+        if not auth.hasvalidaccesstoken() and not auth.authenticate():
+            sys.exit(1)
+        loader = AuthenticatedLoader(auth)
+    else:
+        loader = RawLoader()
 
     ts = time.strftime('%Y-%m-%dT%H%M%S%Z', time.localtime())
     outname = ('{}_{}'.format(args.name, ts)
@@ -329,14 +343,13 @@ if __name__ == '__main__':
     printer = TablePrinter(['title', 'album', 'artist'], multifields=['artist'])
 
     if args.tracklistmode:
-        tp = TracksProcessor(auth)
+        tp = TracksProcessor(loader)
 
         if args.fromraw:
-            rawapiresponse = json.loads(open(args.input).read())
-            extracted = TracksProcessor.extract(rawapiresponse)
+            extracted = TracksProcessor.extract(tp.loadtracksdata(args.input))
         else:
-            tids = TracksProcessor.loadtrackids(args.input)
-            response = tp.loadtracksdata(tids)
+            tidsurl = TracksProcessor.make_track_ids_url(args.input)
+            response = tp.loadtracksdata(tidsurl)
             if not response:
                 sys.exit(1)
             if args.saveraw:
@@ -346,9 +359,9 @@ if __name__ == '__main__':
                 savejson(extracted, outname + '.json', True)
         printer.printtracktable(extracted)
     else:
-        pp = PlaylistProcessor(auth)
+        pp = PlaylistProcessor(loader)
         if args.fromraw:
-            rawapiresponse = json.loads(open(args.input).read())
+            rawapiresponse = pp.loadplaylistdata(args.input)
             try:
                 extracted = PlaylistProcessor.extract(rawapiresponse)
             except KeyError:
