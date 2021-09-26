@@ -1,7 +1,9 @@
 #!/usr/bin/env python
+# coding:utf-8
 
+"""Extracts some information from the JSON result of an Spotify API tracks request.
+"""
 
-from __future__ import print_function
 
 import sys
 import json
@@ -11,11 +13,7 @@ import re
 import argparse
 import base64
 import logging
-import codecs
-
-
-"""Extracts some information from the JSON result of an Spotify API tracks request.
-"""
+import configparser
 
 
 class Auth(object):
@@ -24,48 +22,25 @@ class Auth(object):
         self._clientsecret = None
         self._accesstoken = None
         self._tokenexpiretime = None
+
+        cp = configparser.ConfigParser()
         try:
-            # Python 2.7
-            import ConfigParser
-            cp = ConfigParser.ConfigParser()
-            try:
-                cp.read(credentialsfilename)
-            except ConfigParser.MissingSectionHeaderError as e:
-                logging.error('missing section "spotify" in {}'.format(credentialsfilename))
-                raise e
-            if not cp.has_section('spotify'):
-                logging.error('missing section "spotify" in {}'.format(credentialsfilename))
-                raise Exception
-            if cp.has_option('spotify', 'ClientID'):
-                self._clientid = cp.get('spotify', 'ClientID')
-            if cp.has_option('spotify', 'ClientSecret'):
-                self._clientsecret = cp.get('spotify', 'ClientSecret')
-            if self._clientid is None and self._clientsecret is None:
-                if cp.has_option('spotify', 'AccessToken'):
-                    self._accesstoken = cp.get('spotify', 'AccessToken')
-                    # assume the token was just created and is valid for the next 55 minutes
-                    self._tokenexpiretime = int(time.time()) + (55 * 60)
-        except ImportError:
-            # Python 3.x
-            import configparser
-            cp = configparser.ConfigParser()
-            try:
-                cp.read(credentialsfilename)
-            except configparser.MissingSectionHeaderError as e:
-                logging.error('missing section "spotify" in {}'.format(credentialsfilename))
-                raise e
-            if 'spotify' not in cp:
-                logging.error('missing section "spotify" in {}'.format(credentialsfilename))
-                raise Exception
-            if 'ClientID' in cp['spotify']:
-                self._clientid = cp['spotify']['ClientID']
-            if 'ClientSecret' in cp['spotify']:
-                self._clientsecret = cp['spotify']['ClientSecret']
-            if self._clientid is None and self._clientsecret is None:
-                if 'AccessToken' in cp['spotify']:
-                    self._accesstoken = cp['spotify']['AccessToken']
-                    # assume the token was just created and is valid for the next 55 minutes
-                    self._tokenexpiretime = int(time.time()) + (55 * 60)
+            cp.read(credentialsfilename)
+        except configparser.MissingSectionHeaderError as err:
+            logging.error('missing section "spotify" in {}'.format(credentialsfilename))
+            raise err
+        if 'spotify' not in cp:
+            logging.error('missing section "spotify" in {}'.format(credentialsfilename))
+            raise Exception
+        if 'ClientID' in cp['spotify']:
+            self._clientid = cp['spotify']['ClientID']
+        if 'ClientSecret' in cp['spotify']:
+            self._clientsecret = cp['spotify']['ClientSecret']
+        if self._clientid is None and self._clientsecret is None:
+            if 'AccessToken' in cp['spotify']:
+                self._accesstoken = cp['spotify']['AccessToken']
+                # assume the token was just created and is valid for the next 55 minutes
+                self._tokenexpiretime = int(time.time()) + (55 * 60)
 
         if self._accesstoken is None and (self._clientid is None or self._clientsecret is None):
             logging.error('AccessToken or ClientID/ClientSecret missing in {}'.format(credentialsfilename))
@@ -377,7 +352,7 @@ if __name__ == '__main__':
             try:
                 extracted = PlaylistProcessor.extract(rawapiresponse)
             except KeyError:
-                logging.error('{} is not a raw playlist (try -l for tracklist mode)'.format(args.input))
+                logging.error('{} is not a raw playlist (try -T for tracklist mode)'.format(args.input))
                 sys.exit(1)
             printer.printplaylist(extracted)
         else:
@@ -403,7 +378,7 @@ if __name__ == '__main__':
                     savejson(extracted, outname + '.json', True)
                 if args.pllmode:
                     logging.info('saving {}'.format(outname))
-                    with codecs.open(outname, mode='wb', encoding='utf8') as fout:
+                    with open(outname, mode='wb') as fout:
                         printer.printplaylist(extracted, printto=fout)
                 else:
                     printer.printplaylist(extracted)
